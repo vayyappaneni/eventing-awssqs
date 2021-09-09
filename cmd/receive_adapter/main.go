@@ -39,6 +39,14 @@ const (
 
 	// envCredsFile is the path of the AWS credentials file
 	envCredsFile = "AWS_APPLICATION_CREDENTIALS"
+
+	envMaxBatchSize = "AWS_SQS_MAX_BATCH_SIZE"
+
+	envSendBatchedResponse = "AWS_SQS_SEND_BATCH_RESPONSE"
+
+	envOnFailedPollWaitSecs = "AWS_SQS_POLL_FAILED_WAIT_TIME"
+
+	envWaitTimeSeconds = "AWS_SQS_WAIT_TIME_SECONDS"
 )
 
 func getRequiredEnv(envKey string) string {
@@ -64,7 +72,10 @@ func main() {
 		QueueURL:             getRequiredEnv(envQueueURL),
 		SinkURI:              getRequiredEnv(envSinkURI),
 		CredsFile:            os.Getenv(envCredsFile),
-		OnFailedPollWaitSecs: 2,
+		OnFailedPollWaitSecs: os.Getenv(envOnFailedPollWaitSecs),
+		MaxBatchSize:         os.Getenv(envMaxBatchSize),
+		SendBatchedResponse:  os.Getenv(envSendBatchedResponse),
+		WaitTimeSeconds:      os.Getenv(envWaitTimeSeconds),
 	}
 
 	logger.Info("Starting AWS SQS Receive Adapter.", zap.Any("adapter", adapter))

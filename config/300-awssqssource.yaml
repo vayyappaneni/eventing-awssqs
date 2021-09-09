@@ -52,6 +52,18 @@ spec:
               type: string
             serviceAccountName:
               type: string
+            maxBatchSize:
+              type: string
+              description: Max Message Size to poll from SQS
+            sendBatchedResponse:
+              type: string
+              description: SendBatchedResponse will send all messages recieved as a single HTTP event rather than individual event per message. value may be true or false
+            onFailedPollWaitSecs:
+              type: string
+              description: OnFailedPollWaitSecs sets the time SQSSource sleeps if it failed to poll from SQS
+            waitTimeSeconds:
+              type: string
+              description: WaitTimeSeconds Controls              
             sink:
               type: object
           required:

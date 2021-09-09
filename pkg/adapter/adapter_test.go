@@ -61,7 +61,7 @@ func TestPostMessage_ServeHTTP(t *testing.T) {
 			a := &Adapter{
 				QueueURL:             "https://sqs.us-east-2.amazonaws.com/123123/MyQueue",
 				SinkURI:              sinkServer.URL,
-				OnFailedPollWaitSecs: 1,
+				OnFailedPollWaitSecs: "1",
 			}
 
 			ctx := cloudevents.ContextWithTarget(context.Background(), sinkServer.URL)

@@ -46,13 +46,34 @@ type Adapter struct {
 	// CredsFile is the full path of the AWS credentials file
 	CredsFile string
 
+	// MaxBatchSize is the max Batch size to be polled form SQS
+	MaxBatchSize string
+
+	// SendBatchedResponse is a flag which if enabled will send all messages received in one HTTP event
+	SendBatchedResponse string
+
 	// OnFailedPollWaitSecs determines the interval to wait after a
 	// failed poll before making another one
-	OnFailedPollWaitSecs time.Duration
+	OnFailedPollWaitSecs string
+
+	// WaitTimeSeconds Controls the maximum time to wait in the poll performed with
+	// ReceiveMessageWithContext.  If there are no messages in the
+	// given secs, the call times out and returns control to us.
+	WaitTimeSeconds string
 
 	// Client sends cloudevents to the target.
 	client cloudevents.Client
 }
+
+const (
+	defaultSendBatchedResponse = false
+
+	defaultMaxBatchSize = 10
+
+	defaultOnFailedPollWaitSecs = 2
+
+	defaultWaitTimeSeconds = 3
+)
 
 // getRegion takes an AWS SQS URL and extracts the region from it
 // e.g. URLs have this form:
@@ -120,11 +141,52 @@ func (a *Adapter) Start(ctx context.Context, stopCh <-chan struct{}) error {
 	return a.pollLoop(ctx, q, stopCh)
 }
 
+func (a *Adapter) getDeleteMessageEntries(sqsMessages []*sqs.Message) (Entries []*sqs.DeleteMessageBatchRequestEntry) {
+	var list []*sqs.DeleteMessageBatchRequestEntry
+	for _, message := range sqsMessages {
+		list = append(list, &sqs.DeleteMessageBatchRequestEntry{
+			Id:            message.MessageId,
+			ReceiptHandle: message.ReceiptHandle,
+		})
+	}
+	return list
+}
+
 // pollLoop continuously polls from the given SQS queue until stopCh
 // emits an element.  The
 func (a *Adapter) pollLoop(ctx context.Context, q *sqs.SQS, stopCh <-chan struct{}) error {
 
 	logger := logging.FromContext(ctx)
+
+	maxBatchSize, err := strconv.ParseInt(a.MaxBatchSize, 10, 64)
+
+	if err != nil {
+		logger.Error("Could not convert maxBatchSize from string to int. Defaulting to ", defaultMaxBatchSize, zap.Error(err))
+		maxBatchSize = defaultMaxBatchSize
+	}
+
+	sendBatchedResponse, err := strconv.ParseBool(a.SendBatchedResponse)
+
+	if err != nil {
+		logger.Error("Could not convert sendBatchedResponse from string to bool, Defaulting to", defaultSendBatchedResponse, zap.Error(err))
+		sendBatchedResponse = defaultSendBatchedResponse
+	}
+
+	onFailedPollWaitSecs, err := strconv.ParseInt(a.OnFailedPollWaitSecs, 10, 0)
+
+	if err != nil {
+		logger.Error("Could not convert onFailedPollWaitSecs from string to time.Duration. Defaulting to ", defaultOnFailedPollWaitSecs, zap.Error(err))
+		onFailedPollWaitSecs = defaultOnFailedPollWaitSecs
+	}
+
+	waitTimeSeconds, err := strconv.ParseInt(a.WaitTimeSeconds, 10, 64)
+
+	if err != nil {
+		logger.Error("Could not convert waitTimeSeconds from string to int. Defaulting to ", defaultWaitTimeSeconds, zap.Error(err))
+		waitTimeSeconds = defaultWaitTimeSeconds
+	}
+
+	logger.Infof("value from configs: MaxBatchSize: %d, SendBatchedResponse: , OnFailedPollWaitSecs: , WaitTimeSeconds: ", maxBatchSize, sendBatchedResponse, onFailedPollWaitSecs, waitTimeSeconds)
 
 	for {
 		select {
@@ -133,10 +195,10 @@ func (a *Adapter) pollLoop(ctx context.Context, q *sqs.SQS, stopCh <-chan struct
 			return nil
 		default:
 		}
-		messages, err := poll(ctx, q, a.QueueURL, 10)
+		messages, err := poll(ctx, q, a.QueueURL, maxBatchSize, waitTimeSeconds)
 		if err != nil {
 			logger.Warn("Failed to poll from SQS queue", zap.Error(err))
-			time.Sleep(a.OnFailedPollWaitSecs * time.Second)
+			time.Sleep(time.Duration(onFailedPollWaitSecs) * time.Second)
 			continue
 		}
 		for _, m := range messages {
@@ -212,7 +274,7 @@ func (a *Adapter) postMessage(ctx context.Context, logger *zap.SugaredLogger, m 
 }
 
 // poll reads messages from the queue in batches of a given maximum size.
-func poll(ctx context.Context, q *sqs.SQS, url string, maxBatchSize int64) ([]*sqs.Message, error) {
+func poll(ctx context.Context, q *sqs.SQS, url string, maxBatchSize int64, waitTimeSeconds int64) ([]*sqs.Message, error) {
 
 	result, err := q.ReceiveMessageWithContext(ctx, &sqs.ReceiveMessageInput{
 		AttributeNames: []*string{
@@ -227,7 +289,7 @@ func poll(ctx context.Context, q *sqs.SQS, url string, maxBatchSize int64) ([]*s
 		// Controls the maximum time to wait in the poll performed with
 		// ReceiveMessageWithContext.  If there are no messages in the
 		// given secs, the call times out and returns control to us.
-		WaitTimeSeconds: aws.Int64(3),
+		WaitTimeSeconds: aws.Int64(waitTimeSeconds),
 	})
 
 	if err != nil {
