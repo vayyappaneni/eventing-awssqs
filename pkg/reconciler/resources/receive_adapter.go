@@ -66,6 +66,26 @@ func MakeReceiveAdapter(args *ReceiveAdapterArgs) *v1.Deployment {
 		},
 	}
 
+	maxBatchSizeProvided := args.Source.Spec.MaxBatchSize
+	if len(maxBatchSizeProvided) != 0 {
+		envVars = append(envVars, corev1.EnvVar{Name: "AWS_SQS_MAX_BATCH_SIZE", Value: maxBatchSizeProvided})
+	}
+
+	sendBatchedResponse := args.Source.Spec.SendBatchedResponse
+	if len(sendBatchedResponse) != 0 {
+		envVars = append(envVars, corev1.EnvVar{Name: "AWS_SQS_SEND_BATCH_RESPONSE", Value: sendBatchedResponse})
+	}
+
+	onFailedPollWaitSecs := args.Source.Spec.OnFailedPollWaitSecs
+	if len(onFailedPollWaitSecs) != 0 {
+		envVars = append(envVars, corev1.EnvVar{Name: "AWS_SQS_POLL_FAILED_WAIT_TIME", Value: onFailedPollWaitSecs})
+	}
+
+	waitTimeSeconds := args.Source.Spec.WaitTimeSeconds
+	if len(waitTimeSeconds) != 0 {
+		envVars = append(envVars, corev1.EnvVar{Name: "AWS_SQS_WAIT_TIME_SECONDS", Value: waitTimeSeconds})
+	}
+
 	volMounts := []corev1.VolumeMount(nil)
 	vols := []corev1.Volume(nil)
 
