@@ -61,12 +61,14 @@ func NewController(
 	impl := v1alpha1awssqssource.NewImpl(ctx, r)
 
 	// Set sink resolver.
-	r.sinkResolver = resolver.NewURIResolverFromTracker(ctx, impl.Tracker)
+	r.sinkResolver = resolver.NewURIResolver(ctx, impl.EnqueueKey)
+
+	logger.Info("Setting up event handlers.")
 
 	awssqssourceInformer.Informer().AddEventHandler(controller.HandleAll(impl.Enqueue))
 
 	deploymentInformer.Informer().AddEventHandler(cache.FilteringResourceEventHandler{
-		FilterFunc: controller.FilterController(&v1alpha1.AwsSqsSource{}),
+		FilterFunc: controller.FilterControllerGVK(v1alpha1.SchemeGroupVersion.WithKind("AwsSqsSource")),
 		Handler:    controller.HandleAll(impl.EnqueueControllerOf),
 	})
 

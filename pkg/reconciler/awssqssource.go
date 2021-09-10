@@ -110,18 +110,28 @@ func (r *Reconciler) createReceiveAdapter(ctx context.Context, src *v1alpha1.Aws
 		return nil, err
 	}
 
-	if ra != nil {
-		logging.FromContext(ctx).Desugar().Info("Reusing existing receive adapter", zap.Any("receiveAdapter", ra))
-		// TODO: this is a bug, the deployment should be updated.
-		return ra, nil
-	}
-
 	expected := resources.MakeReceiveAdapter(&resources.ReceiveAdapterArgs{
 		Image:   r.receiveAdapterImage,
 		Source:  src,
 		Labels:  getLabels(src),
 		SinkURI: src.Status.SinkURI.String(),
 	})
+
+	if ra != nil {
+		logging.FromContext(ctx).Desugar().Info("Reusing existing receive adapter", zap.Any("receiveAdapter", ra))
+
+		ra.Spec = expected.Spec
+		ra, err = r.kubeClientSet.AppsV1().Deployments(src.Namespace).Update(ctx, ra, metav1.UpdateOptions{})
+		if err != nil {
+			return ra, err
+		}
+
+		logging.FromContext(ctx).Desugar().Info("Successfully reconciled ", zap.Any("receiveAdapter", ra))
+		return ra, nil
+
+	}
+
+
 
 	ra, err = r.kubeClientSet.AppsV1().Deployments(src.Namespace).Create(ctx, expected, metav1.CreateOptions{})
 	logging.FromContext(ctx).Desugar().Info("Receive Adapter created.", zap.Error(err), zap.Any("receiveAdapter", ra))

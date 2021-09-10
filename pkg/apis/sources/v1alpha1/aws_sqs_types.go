@@ -58,6 +58,18 @@ type AwsSqsSourceSpec struct {
 	// +optional
 	Annotations map[string]string `json:"annotations,omitempty"`
 
+	// Number of replicas for the SQS Adapter
+    // +optional
+    Replicas int32 `json:"replicas,omitempty"`
+
+    // Node Selector to add to the pod
+    // +optional
+    NodeSelector map[string]string `json:"nodeSelector,omitempty"`
+
+    // Affinity to add to the pod
+    // +optional
+    Affinity corev1.Affinity `json:"affinity,omitempty"`
+
 	// Max Message Size to poll from SQS
 	// +optional
 	MaxBatchSize string `json:"maxBatchSize,omitempty"`
