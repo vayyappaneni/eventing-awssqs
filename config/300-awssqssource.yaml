@@ -63,7 +63,16 @@ spec:
               description: OnFailedPollWaitSecs sets the time SQSSource sleeps if it failed to poll from SQS
             waitTimeSeconds:
               type: string
-              description: WaitTimeSeconds Controls              
+              description: WaitTimeSeconds Controls the maximum time to wait in the poll performed with ReceiveMessageWithContext.  If there are no messages in the given secs, the call times out and returns control to us.
+            replicas:
+              type: integer
+              description: replicas controls the number of replicas of receive-adapter pods per deployment
+            nodeSelector:
+              type: object
+              description: assigns Node Selector to the receive adapter pods
+            affinity:
+              type: object
+              description: assigns affinity to the receive adapter pods
             sink:
               type: object
           required:

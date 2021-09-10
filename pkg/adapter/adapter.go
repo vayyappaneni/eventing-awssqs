@@ -141,14 +141,14 @@ func (a *Adapter) Start(ctx context.Context, stopCh <-chan struct{}) error {
 }
 
 func (a *Adapter) getDeleteMessageEntries(sqsMessages []*sqs.Message) (Entries []*sqs.DeleteMessageBatchRequestEntry) {
-	var list []*sqs.DeleteMessageBatchRequestEntry
-	for _, message := range sqsMessages {
-		list = append(list, &sqs.DeleteMessageBatchRequestEntry{
-			Id:            message.MessageId,
-			ReceiptHandle: message.ReceiptHandle,
-		})
-	}
-	return list
+    var list []*sqs.DeleteMessageBatchRequestEntry
+    for _, message := range sqsMessages {
+        list = append(list, &sqs.DeleteMessageBatchRequestEntry {
+        	Id:            message.MessageId,
+        	ReceiptHandle: message.ReceiptHandle,
+        })
+    }
+    return list
 }
 
 // pollLoop continuously polls from the given SQS queue until stopCh
@@ -157,35 +157,31 @@ func (a *Adapter) pollLoop(ctx context.Context, q *sqs.SQS, stopCh <-chan struct
 
 	logger := logging.FromContext(ctx)
 
-	maxBatchSize, err := strconv.ParseInt(a.MaxBatchSize, 10, 64)
 
+	maxBatchSize, err := strconv.ParseInt(a.MaxBatchSize,10,64)
 	if err != nil {
-		logger.Error("Could not convert maxBatchSize from string to int. Defaulting to ", defaultMaxBatchSize, zap.Error(err))
+		logger.Info("Could not Find or convert maxBatchSize from string to int. Defaulting to ", defaultMaxBatchSize, zap.Error(err))
 		maxBatchSize = defaultMaxBatchSize
 	}
-
 	sendBatchedResponse, err := strconv.ParseBool(a.SendBatchedResponse)
-
 	if err != nil {
-		logger.Error("Could not convert sendBatchedResponse from string to bool, Defaulting to", defaultSendBatchedResponse, zap.Error(err))
+		logger.Info("Could not Find or convert sendBatchedResponse from string to bool, Defaulting to", defaultSendBatchedResponse, zap.Error(err))
 		sendBatchedResponse = defaultSendBatchedResponse
 	}
-
-	onFailedPollWaitSecs, err := strconv.ParseInt(a.OnFailedPollWaitSecs, 10, 0)
-
+	onFailedPollWaitSecs, err := strconv.ParseInt(a.OnFailedPollWaitSecs,10,0)
 	if err != nil {
-		logger.Error("Could not convert onFailedPollWaitSecs from string to time.Duration. Defaulting to ", defaultOnFailedPollWaitSecs, zap.Error(err))
+		logger.Info("Could not Find or convert onFailedPollWaitSecs from string to time.Duration. Defaulting to ", defaultOnFailedPollWaitSecs, zap.Error(err))
 		onFailedPollWaitSecs = defaultOnFailedPollWaitSecs
 	}
-
-	waitTimeSeconds, err := strconv.ParseInt(a.WaitTimeSeconds, 10, 64)
-
+	waitTimeSeconds, err := strconv.ParseInt(a.WaitTimeSeconds,10,64)
 	if err != nil {
-		logger.Error("Could not convert waitTimeSeconds from string to int. Defaulting to ", defaultWaitTimeSeconds, zap.Error(err))
+		logger.Info("Could not Find or convert waitTimeSeconds from string to int. Defaulting to ", defaultWaitTimeSeconds, zap.Error(err))
 		waitTimeSeconds = defaultWaitTimeSeconds
 	}
 
-	logger.Infof("value from configs: MaxBatchSize: %d, SendBatchedResponse: , OnFailedPollWaitSecs: , WaitTimeSeconds: ", maxBatchSize, sendBatchedResponse, onFailedPollWaitSecs, waitTimeSeconds)
+
+	logger.Infof("value from configs: MaxBatchSize: %d, SendBatchedResponse: %b, OnFailedPollWaitSecs: %d, WaitTimeSeconds: %d", maxBatchSize, sendBatchedResponse, onFailedPollWaitSecs, waitTimeSeconds)
+
 
 	for {
 		select {
@@ -194,26 +190,45 @@ func (a *Adapter) pollLoop(ctx context.Context, q *sqs.SQS, stopCh <-chan struct
 			return nil
 		default:
 		}
+
 		messages, err := poll(ctx, q, a.QueueURL, maxBatchSize, waitTimeSeconds)
 		if err != nil {
 			logger.Warn("Failed to poll from SQS queue", zap.Error(err))
 			time.Sleep(time.Duration(onFailedPollWaitSecs) * time.Second)
 			continue
 		}
-		for _, m := range messages {
-			a.receiveMessage(ctx, m, func() {
-				_, err = q.DeleteMessage(&sqs.DeleteMessageInput{
+
+		if (sendBatchedResponse && len(messages) > 0){
+			a.receiveMessages(ctx, messages, func() {
+				_, err = q.DeleteMessageBatch(&sqs.DeleteMessageBatchInput{
 					QueueUrl:      &a.QueueURL,
-					ReceiptHandle: m.ReceiptHandle,
+					Entries: a.getDeleteMessageEntries(messages),
 				})
 				if err != nil {
 					// the only consequence is that the message will
 					// get redelivered later, given that SQS is
 					// at-least-once delivery. That should be
 					// acceptable as "normal operation"
-					logger.Error("Failed to delete message", zap.Error(err))
+					logger.Error("Failed to delete messages", zap.Error(err))
 				}
 			})
+		} else {
+			for _, m := range messages {
+				a.receiveMessage(ctx, m, func() {
+					_, err = q.DeleteMessage(&sqs.DeleteMessageInput{
+						QueueUrl:      &a.QueueURL,
+						ReceiptHandle: m.ReceiptHandle,
+					})
+					if err != nil {
+						// the only consequence is that the message will
+						// get redelivered later, given that SQS is
+						// at-least-once delivery. That should be
+						// acceptable as "normal operation"
+						logger.Error("Failed to delete message", zap.Error(err))
+					}
+				})
+			}
+
 		}
 	}
 }
@@ -228,6 +243,24 @@ func (a *Adapter) receiveMessage(ctx context.Context, m *sqs.Message, ack func()
 	ctx = cloudevents.ContextWithTarget(ctx, a.SinkURI)
 
 	err := a.postMessage(ctx, logger, m)
+	if err != nil {
+		logger.Infof("Event delivery failed: %s", err)
+	} else {
+		logger.Debug("Message successfully posted to Sink")
+		ack()
+	}
+}
+
+// receiveMessages handles an incoming list of message from the AWS SQS queue,
+// and forwards it to a Sink, calling `ack()` when the forwarding is
+// successful.
+func (a *Adapter) receiveMessages(ctx context.Context, messages []*sqs.Message, ack func()) {
+	logger := logging.FromContext(ctx).With(zap.Any("eventID", messages[0].MessageId)).With(zap.Any("sink", a.SinkURI))
+	logger.Debugw("Received messages from SQS:", zap.Any("messagesLength", len(messages)))
+
+	ctx = cloudevents.ContextWithTarget(ctx, a.SinkURI)
+
+	err := a.postMessages(ctx, logger, messages)
 	if err != nil {
 		logger.Infof("Event delivery failed: %s", err)
 	} else {
@@ -257,9 +290,44 @@ func (a *Adapter) makeEvent(m *sqs.Message) (*cloudevents.Event, error) {
 	return &event, nil
 }
 
+func (a *Adapter) makeBatchEvent(messages []*sqs.Message) (*cloudevents.Event, error) {
+	timestamp, err := strconv.ParseInt(*messages[0].Attributes["SentTimestamp"], 10, 64)
+	if err == nil {
+		//Convert to nanoseconds as sqs SentTimestamp is millisecond
+		timestamp = timestamp * int64(1000000)
+	} else {
+		timestamp = time.Now().UnixNano()
+	}
+
+	event := cloudevents.NewEvent(cloudevents.VersionV1)
+	event.SetID(*messages[0].MessageId)
+	event.SetType(sourcesv1alpha1.AwsSqsSourceEventType)
+	event.SetSource(cloudevents.ParseURIRef(a.QueueURL).String())
+	event.SetTime(time.Unix(0, timestamp))
+
+	if err := event.SetData(cloudevents.ApplicationJSON, messages); err != nil {
+		return nil, err
+	}
+	return &event, nil
+}
+
 // postMessage sends an SQS event to the SinkURI
 func (a *Adapter) postMessage(ctx context.Context, logger *zap.SugaredLogger, m *sqs.Message) error {
 	event, err := a.makeEvent(m)
+
+	if err != nil {
+		logger.Error("Cloud Event creation error", zap.Error(err))
+		return err
+	}
+	if result := a.client.Send(ctx, *event); !cloudevents.IsACK(result) {
+		logger.Error("Cloud Event delivery error", zap.Error(result))
+		return result
+	}
+	return nil
+}
+// postMessages sends an array of SQS events to the SinkURI
+func (a *Adapter) postMessages(ctx context.Context, logger *zap.SugaredLogger, messages []*sqs.Message) error {
+	event, err := a.makeBatchEvent(messages)
 
 	if err != nil {
 		logger.Error("Cloud Event creation error", zap.Error(err))
@@ -288,6 +356,7 @@ func poll(ctx context.Context, q *sqs.SQS, url string, maxBatchSize int64, waitT
 		// Controls the maximum time to wait in the poll performed with
 		// ReceiveMessageWithContext.  If there are no messages in the
 		// given secs, the call times out and returns control to us.
+		// TODO: expose this as ENV variable
 		WaitTimeSeconds: aws.Int64(waitTimeSeconds),
 	})
 
